@@ -182,7 +182,9 @@ class TuyaLocalLight(TuyaLocalEntity, LightEntity):
             color = self._rgbhsv_dps.decoded_value(self._device)
             fmt = self._rgbhsv_dps.format
             if fmt and color:
-                vals = unpack(fmt.get("format"), color)
+                offset = self._rgbhsv_dps.offset
+                binary = color[offset:]
+                vals = unpack(fmt.get("format"), binary)
                 idx = 0
                 rgbhsv = {}
                 for v in vals:

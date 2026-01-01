@@ -177,3 +177,33 @@ async def test_is_off_when_off_by_brightness():
     light = TuyaLocalLight(mock_device, config)
     assert light.is_on is False
     assert light.brightness == 0
+
+
+@pytest.mark.asyncio
+async def test_rgbhsv_with_offset():
+    """Test that _unpacked_rgbhsv works with offset."""
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+    dps = {"24": "03e803e80000"}
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    mock_config = Mock()
+    config = TuyaEntityConfig(
+        mock_config,
+        {
+            "entity": "light",
+            "dps": [
+                {
+                    "id": "24",
+                    "name": "rgbhsv",
+                    "type": "hex",
+                    "format": ">HHH",
+                    "offset": 0,
+                },
+            ],
+        },
+    )
+    light = TuyaLocalLight(mock_device, config)
+    h, s, v = light._unpacked_rgbhsv(mock_device, config.find_dps("rgbhsv"))
+    assert h == 1000
+    assert s == 1000
+    assert v == 0

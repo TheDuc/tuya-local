@@ -120,6 +120,7 @@ DP_SCHEMA = vol.Schema(
         vol.Optional("mask"): str,
         vol.Optional("endianness"): vol.In(["little"]),
         vol.Optional("mask_signed"): True,
+        vol.Optional("offset"): int,
     }
 )
 ENTITY_SCHEMA = vol.Schema(
@@ -819,3 +820,63 @@ class TestDeviceConfig(IsolatedAsyncioTestCase):
         """Test that matching with product id fails when there is a conflict"""
         cfg = get_config("smartplugv1")
         self.assertFalse(cfg.matches({"1": "wrong_type"}, ["37mnhia3pojleqfh"]))
+
+    def test_hex_with_offset_get_value(self):
+        """Test that get_value works with hex encoding and offset."""
+        mock_entity = MagicMock()
+        mock_config = {
+            "id": "24",
+            "name": "brightness",
+            "type": "hex",
+            "format": "H",
+            "offset": 0,
+        }
+        mock_device = MagicMock()
+        mock_device.get_property.return_value = "03e80000"
+        cfg = TuyaDpsConfig(mock_entity, mock_config)
+        self.assertEqual(cfg.get_value(mock_device), 1000)
+
+    def test_hex_with_offset_get_value_non_zero(self):
+        """Test that get_value works with hex encoding and non-zero offset."""
+        mock_entity = MagicMock()
+        mock_config = {
+            "id": "24",
+            "name": "color_temp",
+            "type": "hex",
+            "format": "H",
+            "offset": 2,
+        }
+        mock_device = MagicMock()
+        mock_device.get_property.return_value = "03e803e8"
+        cfg = TuyaDpsConfig(mock_entity, mock_config)
+        self.assertEqual(cfg.get_value(mock_device), 1000)
+
+    def test_hex_with_offset_set_value(self):
+        """Test that get_values_to_set works with hex encoding and offset."""
+        mock_entity = MagicMock()
+        mock_config = {
+            "id": "24",
+            "name": "brightness",
+            "type": "hex",
+            "format": "H",
+            "offset": 0,
+        }
+        mock_device = MagicMock()
+        mock_device.get_property.return_value = "00000000"
+        cfg = TuyaDpsConfig(mock_entity, mock_config)
+        self.assertEqual(cfg.get_values_to_set(mock_device, 1000), {"24": "03e80000"})
+
+    def test_hex_with_offset_set_value_non_zero(self):
+        """Test that get_values_to_set works with hex encoding and non-zero offset."""
+        mock_entity = MagicMock()
+        mock_config = {
+            "id": "24",
+            "name": "color_temp",
+            "type": "hex",
+            "format": "H",
+            "offset": 2,
+        }
+        mock_device = MagicMock()
+        mock_device.get_property.return_value = "03e80000"
+        cfg = TuyaDpsConfig(mock_entity, mock_config)
+        self.assertEqual(cfg.get_values_to_set(mock_device, 1000), {"24": "03e803e8"})

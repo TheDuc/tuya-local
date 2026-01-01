@@ -21,20 +21,26 @@ entities:
             value: Scene
           - dps_val: music
             value: Music
-      - id: 22
+      - id: 24
         name: brightness
-        type: integer
-        optional: true
-        range:
-          min: 10
-          max: 1000
-      - id: 23
+        type: hex
+        offset: 0
+        format:
+          - name: b
+            bytes: 2
+            range:
+              min: 10
+              max: 1000
+      - id: 24
         name: color_temp
-        type: integer
-        optional: true
-        range:
-          min: 0
-          max: 1000
+        type: hex
+        offset: 2
+        format:
+          - name: t
+            bytes: 2
+            range:
+              min: 0
+              max: 1000
         mapping:
           - target_range:
               min: 2700
@@ -42,6 +48,7 @@ entities:
       - id: 24
         name: rgbhsv
         type: hex
+        offset: 0
         format:
           - name: h
             bytes: 2

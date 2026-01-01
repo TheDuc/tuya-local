@@ -390,6 +390,7 @@ class TuyaDpsConfig:
         self._entity = entity
         self._config = config
         self.stringify = False
+        self.offset = self._config.get("offset", 0)
 
     @property
     def id(self):
@@ -477,6 +478,13 @@ class TuyaDpsConfig:
         """Return the value of the dps from the given device."""
         mask = self.mask
         bytevalue = self.decoded_value(device)
+        if self.format and isinstance(bytevalue, bytes):
+            binary = bytevalue[self.offset:]
+            vals = unpack(self.format["format"], binary)
+            if len(vals) == 1:
+                bytevalue = vals[0]
+            else:
+                bytevalue = dict(zip(self.format["names"], vals))
         if mask and isinstance(bytevalue, bytes):
             value = int.from_bytes(bytevalue, self.endianness)
             scale = mask & (1 + ~mask)
@@ -490,7 +498,7 @@ class TuyaDpsConfig:
 
             return self._map_from_dps(raw_result, device)
         else:
-            return self._map_from_dps(device.get_property(self.id), device)
+            return self._map_from_dps(bytevalue, device)
 
     def decoded_value(self, device):
         v = self._map_from_dps(device.get_property(self.id), device)
@@ -1064,6 +1072,26 @@ class TuyaDpsConfig:
                 raise ValueError(f"{self.name} ({value}) must be between {mn} and {mx}")
         if mask and isinstance(result, bool):
             result = int(result)
+
+        if self.rawtype == "hex" and self.format:
+            current = device.get_property(self.id)
+            length = struct.calcsize(self.format["format"])
+            if current is None:
+                current = b'\x00' * (self.offset + length)
+            binary = current
+            if len(self.format["names"]) == 1:
+                packed = pack(self.format["format"], result)
+                binary = current[:self.offset] + packed + current[self.offset + len(packed):]
+            else:
+                current_binary = current[self.offset: self.offset + length]
+                current_vals = unpack(self.format["format"], current_binary)
+                current_dict = dict(zip(self.format["names"], current_vals))
+                current_dict.update(result)
+                ordered = [current_dict[n] for n in self.format["names"]]
+                packed = pack(self.format["format"], *ordered)
+                binary = current[:self.offset] + packed + current[self.offset + len(packed):]
+            dps_map[self.id] = self.encode_value(binary)
+            return dps_map
 
         if mask and isinstance(result, Number):
             # mask is in hex, 2 digits/characters per byte
