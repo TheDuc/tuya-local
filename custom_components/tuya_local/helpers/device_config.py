@@ -10,6 +10,7 @@ from fnmatch import fnmatch
 from numbers import Number
 from os import scandir
 from os.path import dirname, exists, join, splitext
+from struct import pack, unpack
 
 from homeassistant.util import slugify
 from homeassistant.util.yaml import load_yaml
