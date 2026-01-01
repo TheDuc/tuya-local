@@ -1079,6 +1079,8 @@ class TuyaDpsConfig:
             length = struct.calcsize(self.format["format"])
             if current is None:
                 current = b'\x00' * (self.offset + length)
+            elif len(current) < self.offset + length:
+                current = current.ljust(self.offset + length, b'\x00')
             binary = current
             if len(self.format["names"]) == 1:
                 packed = pack(self.format["format"], result)
