@@ -153,6 +153,14 @@ entities:
         type: base64
         optional: true
         name: value
+  - entity: switch
+    name: Switch (DP20)
+    category: config
+    icon: "mdi:toggle-switch"
+    dps:
+      - id: 20
+        type: boolean
+        name: switch
   - entity: select
     name: Color mode (DP21)
     category: config
@@ -170,6 +178,30 @@ entities:
             value: scene
           - dps_val: music
             value: music
+  - entity: number
+    name: Brightness (DP22)
+    category: config
+    icon: "mdi:brightness-6"
+    dps:
+      - id: 22
+        type: integer
+        name: value
+        optional: true
+        range:
+          min: 10
+          max: 1000
+  - entity: number
+    name: Color temp (DP23)
+    category: config
+    icon: "mdi:thermometer"
+    dps:
+      - id: 23
+        type: integer
+        name: value
+        optional: true
+        range:
+          min: 0
+          max: 1000
   - entity: text
     name: RGBHSV data (DP24)
     category: config
@@ -177,4 +209,69 @@ entities:
     dps:
       - id: 24
         type: hex
+        name: value
+  - entity: number
+    name: Timer (DP26)
+    category: config
+    icon: "mdi:timer"
+    dps:
+      - id: 26
+        type: integer
+        name: value
+        range:
+          min: 0
+          max: 86400
+  - entity: text
+    name: Music data (DP27)
+    category: config
+    icon: "mdi:music"
+    dps:
+      - id: 27
+        type: string
+        optional: true
+        name: value
+  - entity: text
+    name: Control data (DP28)
+    category: config
+    icon: "mdi:cogs"
+    dps:
+      - id: 28
+        type: string
+        optional: true
+        name: value
+  - entity: number
+    name: Pixels (DP47)
+    category: config
+    icon: "mdi:led-strip"
+    dps:
+      - id: 47
+        type: integer
+        name: value
+        unit: px
+  - entity: text
+    name: Scene (DP51)
+    category: config
+    icon: "mdi:palette"
+    dps:
+      - id: 51
+        type: string
+        optional: true
+        name: value
+  - entity: text
+    name: Dreamlight music data (DP52)
+    category: config
+    icon: "mdi:music"
+    dps:
+      - id: 52
+        type: base64
+        optional: true
+        name: value
+  - entity: text
+    name: Paint data (DP61)
+    category: config
+    icon: "mdi:palette"
+    dps:
+      - id: 61
+        type: base64
+        optional: true
         name: value
