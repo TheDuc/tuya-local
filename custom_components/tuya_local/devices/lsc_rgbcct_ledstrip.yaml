@@ -153,3 +153,28 @@ entities:
         type: base64
         optional: true
         name: value
+  - entity: select
+    name: Color mode (DP21)
+    category: config
+    icon: "mdi:palette"
+    dps:
+      - id: 21
+        type: string
+        name: option
+        mapping:
+          - dps_val: white
+            value: white
+          - dps_val: colour
+            value: colour
+          - dps_val: scene
+            value: scene
+          - dps_val: music
+            value: music
+  - entity: text
+    name: RGBHSV data (DP24)
+    category: config
+    icon: "mdi:code-braces"
+    dps:
+      - id: 24
+        type: hex
+        name: value
