@@ -28,12 +28,15 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     config = {**config_entry.data, **config_entry.options}
+    entity_class = TuyaLocalLight
+    if config.get("type") == "lsc_rgbcct_ledstrip":
+        entity_class = LSCRGBCCTLight
     await async_tuya_setup_platform(
         hass,
         async_add_entities,
         config,
         "light",
-        TuyaLocalLight,
+        entity_class,
     )
 
 
@@ -530,3 +533,135 @@ class TuyaLocalLight(TuyaLocalEntity, LightEntity):
         disp_on = self.is_on
 
         await (self.async_turn_on() if not disp_on else self.async_turn_off())
+
+
+class LSCRGBCCTLight(TuyaLocalLight):
+    """Representation of LSC RGB+CCT LED strip."""
+
+    def __init__(self, device: TuyaLocalDevice, config: TuyaEntityConfig):
+        super().__init__(device, config)
+        self._control_data_dps = config.find_dps("control_data")
+        self._attr_min_color_temp_kelvin = 2700
+        self._attr_max_color_temp_kelvin = 6500
+        self._attr_supported_color_modes = {ColorMode.COLOR_TEMP, ColorMode.HS}
+
+    @property
+    def supported_color_modes(self):
+        return self._attr_supported_color_modes
+
+    @property
+    def color_mode(self):
+        """Return the color mode of the light."""
+        if self._control_data_dps:
+            data = self._control_data_dps.decoded_value(self._device)
+            if data and len(data) >= 2:
+                mode = data[1]
+                if mode == 0x01:
+                    return ColorMode.HS
+                elif mode == 0x00:
+                    return ColorMode.COLOR_TEMP
+        return ColorMode.UNKNOWN
+
+    @property
+    def brightness(self):
+        """Get the current brightness of the light."""
+        if self._control_data_dps:
+            data = self._control_data_dps.decoded_value(self._device)
+            if data and len(data) >= 9:
+                mode = data[1]
+                if mode == 0x01:  # color mode
+                    return round(data[8] * 255 / 100)
+                elif mode == 0x00:  # white mode
+                    return round(data[5] * 255 / 100)
+        return None
+
+    @property
+    def color_temp_kelvin(self):
+        """Return the color temperature in kelvin."""
+        if self.color_mode == ColorMode.COLOR_TEMP and self._control_data_dps:
+            data = self._control_data_dps.decoded_value(self._device)
+            if data and len(data) >= 9:
+                # Color temp is in byte 6, range 0-100, map to 2700-6500K
+                ct_percent = data[6]
+                return round(2700 + (ct_percent / 100) * (6500 - 2700))
+        return None
+
+    @property
+    def hs_color(self):
+        """Get the current hs color of the light."""
+        if self.color_mode == ColorMode.HS and self._control_data_dps:
+            data = self._control_data_dps.decoded_value(self._device)
+            if data and len(data) >= 9:
+                # Hue is in bytes 5-6 (high-low), range 0-360
+                h = (data[5] << 8) | data[6]
+                # Saturation is in byte 7, range 0-100
+                s = data[7]
+                return (h, s)
+        return None
+
+    async def async_turn_on(self, **params):
+        """Turn on the light with specified parameters."""
+        if not self._control_data_dps:
+            return
+
+        # Get current data or default
+        current_data = self._control_data_dps.decoded_value(self._device)
+        if not current_data or len(current_data) < 9:
+            current_data = bytearray([0x00, 0x00, 0x00, 0x14, 0x00, 0x64, 0x64, 0x64, 0x64])  # defaults
+
+        new_data = bytearray(current_data)
+
+        # If no specific parameters, just ensure it's on
+        if not params:
+            pass  # Keep current data
+        # Determine mode and set parameters
+        elif ATTR_HS_COLOR in params:
+            new_data[1] = 0x01  # color mode
+            hs = params[ATTR_HS_COLOR]
+            brightness = params.get(ATTR_BRIGHTNESS, self.brightness or 255)
+            h = int(hs[0])
+            s = int(hs[1])
+            v = int(brightness * 100 / 255)
+            new_data[5] = (h >> 8) & 0xFF  # high byte of hue
+            new_data[6] = h & 0xFF  # low byte of hue
+            new_data[7] = s  # saturation 0-100
+            new_data[8] = v  # brightness 0-100
+
+        elif ATTR_COLOR_TEMP_KELVIN in params:
+            new_data[1] = 0x00  # white mode
+            color_temp = params[ATTR_COLOR_TEMP_KELVIN]
+            brightness = params.get(ATTR_BRIGHTNESS, self.brightness or 255)
+            # Map color temp 2700-6500K to 0-100
+            ct_percent = round((color_temp - 2700) / (6500 - 2700) * 100)
+            ct_percent = max(0, min(100, ct_percent))
+            b_percent = round(brightness * 100 / 255)
+            new_data[5] = b_percent  # brightness in white mode
+            new_data[6] = ct_percent  # color temp in white mode
+            # bytes 7-8 unused in white mode
+
+        elif ATTR_BRIGHTNESS in params:
+            # Keep current mode
+            brightness = params[ATTR_BRIGHTNESS]
+            b_percent = round(brightness * 100 / 255)
+            if new_data[1] == 0x01:  # color mode
+                new_data[8] = b_percent
+            else:  # white mode
+                new_data[5] = b_percent
+
+        # Set the DP
+        encoded_data = self._control_data_dps.encode_value(bytes(new_data))
+        settings = self._control_data_dps.get_values_to_set(self._device, encoded_data)
+
+        # Also set switch if not already on
+        if self._switch_dps and not self.is_on:
+            settings.update(self._switch_dps.get_values_to_set(self._device, True, settings))
+
+        if settings:
+            await self._device.async_set_properties(settings)
+
+    async def async_turn_off(self):
+        """Turn off the light."""
+        if self._switch_dps:
+            await self._switch_dps.async_set_value(self._device, False)
+        else:
+            await super().async_turn_off()
