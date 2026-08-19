@@ -1,8 +1,10 @@
 """Tests for the light entity."""
 
+import base64
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.components.light import ColorMode
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tuya_local.const import (
@@ -12,7 +14,11 @@ from custom_components.tuya_local.const import (
     DOMAIN,
 )
 from custom_components.tuya_local.helpers.device_config import TuyaEntityConfig
-from custom_components.tuya_local.light import TuyaLocalLight, async_setup_entry
+from custom_components.tuya_local.light import (
+    LSCRGBCCTLight,
+    TuyaLocalLight,
+    async_setup_entry,
+)
 
 
 @pytest.mark.asyncio
@@ -358,3 +364,134 @@ async def test_is_off_when_off_by_brightness():
     light = TuyaLocalLight(mock_device, config)
     assert light.is_on is False
     assert light.brightness == 0
+
+
+def _lsc_rgbcct_light_config():
+    return TuyaEntityConfig(
+        Mock(),
+        {
+            "entity": "light",
+            "dps": [
+                {"id": "20", "name": "switch", "type": "boolean"},
+                {
+                    "id": "61",
+                    "name": "control_data",
+                    "type": "base64",
+                    "format": [
+                        {"name": "unknown1", "bytes": 1},
+                        {"name": "mode", "bytes": 1},
+                        {"name": "unknown2", "bytes": 1},
+                        {"name": "unknown3", "bytes": 1},
+                        {"name": "unknown4", "bytes": 1},
+                        {"name": "hue_high", "bytes": 1},
+                        {"name": "hue_low", "bytes": 1},
+                        {"name": "saturation_value", "bytes": 1},
+                        {"name": "brightness_value", "bytes": 1},
+                    ],
+                },
+            ],
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_init_entry_lsc_rgbcct_ledstrip(hass):
+    """Test the LSC RGB+CCT LED strip uses a dedicated light class."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TYPE: "lsc_rgbcct_ledstrip",
+            CONF_DEVICE_ID: "dummy",
+            CONF_PROTOCOL_VERSION: "auto",
+        },
+    )
+    m_add_entities = Mock()
+    m_device = AsyncMock()
+
+    hass.data[DOMAIN] = {}
+    hass.data[DOMAIN]["dummy"] = {}
+    hass.data[DOMAIN]["dummy"]["device"] = m_device
+
+    await async_setup_entry(hass, entry, m_add_entities)
+    assert type(hass.data[DOMAIN]["dummy"]["light"]) is LSCRGBCCTLight
+    m_add_entities.assert_called_once()
+
+
+def test_lsc_rgbcct_light_reads_hs_color():
+    """Test decoding HS color from DP61 control data."""
+    mock_device = Mock()
+    payload = bytes([0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x5A, 0x32, 0x64])
+    dps = {
+        "20": True,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    assert light.color_mode == ColorMode.HS
+    assert light.hs_color == (90, 50)
+    assert light.brightness == 255
+
+
+def test_lsc_rgbcct_light_reads_color_temp():
+    """Test decoding white mode color temperature from DP61 control data."""
+    mock_device = Mock()
+    payload = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x32, 0x00, 0x00])
+    dps = {
+        "20": True,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    assert light.color_mode == ColorMode.COLOR_TEMP
+    assert light.color_temp_kelvin == 4600
+    assert light.brightness == 255
+
+
+@pytest.mark.asyncio
+async def test_lsc_rgbcct_light_turn_on_hs():
+    """Test encoding HS color into DP61 control data."""
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+    payload = bytes([0x00, 0x00, 0x00, 0x14, 0x00, 0x64, 0x64, 0x64, 0x64])
+    dps = {
+        "20": False,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    await light.async_turn_on(hs_color=(120, 75), brightness=128)
+
+    mock_device.async_set_properties.assert_called_once()
+    sent = mock_device.async_set_properties.call_args[0][0]
+    assert sent["20"] is True
+    decoded = base64.b64decode(sent["61"])
+    assert decoded[1] == 0x01
+    assert (decoded[5] << 8) | decoded[6] == 120
+    assert decoded[7] == 75
+    assert decoded[8] == 50
+
+
+@pytest.mark.asyncio
+async def test_lsc_rgbcct_light_turn_on_color_temp():
+    """Test encoding color temperature into DP61 control data."""
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+    payload = bytes([0x00, 0x01, 0x00, 0x14, 0x00, 0x64, 0x64, 0x64, 0x64])
+    dps = {
+        "20": True,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    await light.async_turn_on(color_temp_kelvin=4600, brightness=255)
+
+    mock_device.async_set_properties.assert_called_once()
+    sent = mock_device.async_set_properties.call_args[0][0]
+    decoded = base64.b64decode(sent["61"])
+    assert decoded[1] == 0x00
+    assert decoded[5] == 100
+    assert decoded[6] == 50

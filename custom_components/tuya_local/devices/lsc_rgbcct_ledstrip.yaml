@@ -9,55 +9,28 @@ entities:
       - id: 20
         type: boolean
         name: switch
-      - id: 21
-        name: color_mode
-        type: string
-        mapping:
-          - dps_val: white
-            value: color_temp
-          - dps_val: colour
-            value: hs
-          - dps_val: scene
-            value: Scene
-          - dps_val: music
-            value: Music
-      - id: 22
-        name: brightness
-        type: integer
-        optional: true
-        range:
-          min: 10
-          max: 1000
-      - id: 23
-        name: color_temp
-        type: integer
-        optional: true
-        range:
-          min: 0
-          max: 1000
-        mapping:
-          - target_range:
-              min: 2700
-              max: 6500
-      - id: 24
-        name: rgbhsv
-        type: hex
+      - id: 61
+        name: control_data
+        type: base64
         format:
-          - name: h
-            bytes: 2
-            range:
-              min: 0
-              max: 360
-          - name: s
-            bytes: 2
-            range:
-              min: 0
-              max: 1000
-          - name: v
-            bytes: 2
-            range:
-              min: 0
-              max: 1000
+          - name: unknown1
+            bytes: 1
+          - name: mode
+            bytes: 1
+          - name: unknown2
+            bytes: 1
+          - name: unknown3
+            bytes: 1
+          - name: unknown4
+            bytes: 1
+          - name: hue_high
+            bytes: 1
+          - name: hue_low
+            bytes: 1
+          - name: saturation_value
+            bytes: 1
+          - name: brightness_value
+            bytes: 1
   - entity: time
     translation_key: timer
     category: config
