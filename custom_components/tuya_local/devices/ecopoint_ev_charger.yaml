@@ -124,8 +124,7 @@ entities:
           - dps_val: controlpi_error
             value: Error
   - entity: select
-    name: Charging mode
-    icon: "mdi:ev-station"
+    translation_key: charging_mode
     category: config
     dps:
       - id: 14  # work_mode
@@ -134,11 +133,11 @@ entities:
         name: option
         mapping:
           - dps_val: charge_now
-            value: Immediate
+            value: immediate
           - dps_val: charge_energy
-            value: Fixed charge
+            value: fixed_charge
           - dps_val: charge_schedule
-            value: Scheduled charge
+            value: scheduled_charge
   - entity: sensor
     translation_key: voltage_x
     translation_placeholders:
@@ -165,6 +164,7 @@ entities:
         optional: true
         unit: A
         mask: "0000FFFFFF000000"
+        class: measurement
         mapping:
           - scale: 1000
   - entity: sensor
@@ -179,6 +179,7 @@ entities:
         optional: true
         unit: kW
         mask: "0000000000FFFFFF"
+        class: measurement
         mapping:
           - scale: 1000
   - entity: sensor
@@ -193,6 +194,7 @@ entities:
         optional: true
         unit: V
         mask: "FFFF000000000000"
+        class: measurement
         mapping:
           - scale: 10
   - entity: sensor
@@ -207,6 +209,7 @@ entities:
         optional: true
         unit: A
         mask: "0000FFFFFF000000"
+        class: measurement
         mapping:
           - scale: 1000
   - entity: sensor
@@ -221,6 +224,7 @@ entities:
         optional: true
         unit: kW
         mask: "0000000000FFFFFF"
+        class: measurement
         mapping:
           - scale: 1000
   - entity: sensor
@@ -235,6 +239,7 @@ entities:
         optional: true
         unit: V
         mask: "FFFF000000000000"
+        class: measurement
         mapping:
           - scale: 10
   - entity: sensor
@@ -249,6 +254,7 @@ entities:
         optional: true
         unit: A
         mask: "0000FFFFFF000000"
+        class: measurement
         mapping:
           - scale: 1000
   - entity: sensor
@@ -263,11 +269,11 @@ entities:
         optional: true
         unit: kW
         mask: "0000000000FFFFFF"
+        class: measurement
         mapping:
           - scale: 1000
   - entity: sensor
     class: temperature
-    category: diagnostic
     dps:
       - id: 24
         type: integer
@@ -298,22 +304,6 @@ entities:
         type: integer
         optional: true
         name: minute
-        range:
-          min: 1
-          max: 1440
-  - entity: number
-    name: Charge time
-    # 2025-07-20
-    deprecated: time.charging_time
-    category: config
-    class: duration
-    icon: "mdi:timer"
-    dps:
-      - id: 19
-        type: integer
-        optional: true
-        name: value
-        unit: min
         range:
           min: 1
           max: 1440
@@ -370,6 +360,7 @@ entities:
         name: sensor
         unit: A
         mask: "FFFF0000"
+        class: measurement
         mapping:
           - scale: 10
   - entity: sensor
@@ -383,5 +374,6 @@ entities:
         name: sensor
         unit: A
         mask: "0000FFFF"
+        class: measurement
         mapping:
           - scale: 10

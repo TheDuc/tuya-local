@@ -1,8 +1,10 @@
 """Tests for the light entity."""
 
+import base64
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.components.light import ColorMode
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tuya_local.const import (
@@ -12,7 +14,11 @@ from custom_components.tuya_local.const import (
     DOMAIN,
 )
 from custom_components.tuya_local.helpers.device_config import TuyaEntityConfig
-from custom_components.tuya_local.light import TuyaLocalLight, async_setup_entry
+from custom_components.tuya_local.light import (
+    LSCRGBCCTLight,
+    TuyaLocalLight,
+    async_setup_entry,
+)
 
 
 @pytest.mark.asyncio
@@ -153,6 +159,187 @@ async def test_async_turn_on_with_white_param():
 
 
 @pytest.mark.asyncio
+async def test_async_turn_on_with_brightness_on_packed_dp():
+    """Switch-on must merge cleanly when the dp is shared across sub-fields.
+
+    On packed dps where switch / brightness / color all share the same dp id
+    (e.g. dp 51 with different masks), the switch-on branch was previously
+    skipped once the brightness branch had populated `settings[dp_id]`,
+    leaving the bulb with brightness staged but not actually on.
+
+    For masked switch dps, the merge is always safe — `get_values_to_set`
+    with `pending_map=settings` ORs onto the existing pending value — so the
+    final write contains the switch byte AND the brightness bytes.
+    """
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+    # Bulb currently off: switch byte (mask 0001) is 0, brightness is 0.
+    dps = {"1": "000000000000"}
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    mock_config = Mock()
+    config = TuyaEntityConfig(
+        mock_config,
+        {
+            "entity": "light",
+            "dps": [
+                {
+                    "id": "1",
+                    "name": "switch",
+                    "type": "hex",
+                    "mask": "000100000000",
+                },
+                {
+                    "id": "1",
+                    "name": "brightness",
+                    "type": "hex",
+                    "mask": "0000FFFF0000",
+                    "range": {"min": 0, "max": 1000},
+                },
+            ],
+        },
+    )
+    light = TuyaLocalLight(mock_device, config)
+    await light.async_turn_on(brightness=255)
+    mock_device.async_set_properties.assert_called_once()
+    sent = mock_device.async_set_properties.call_args[0][0]
+    sent_value = int(sent["1"], 16)
+    # brightness bytes set
+    assert sent_value & 0x0000FFFF0000 != 0
+    # switch byte also set (this is the bug — was zero before the fix)
+    assert sent_value & 0x000100000000 != 0
+
+
+@pytest.mark.parametrize(
+    ("brightness_range", "ha_value", "expected_dps", "path"),
+    [
+        # brightness_to_value() uses scale_to_ranged_value((1,255), target, bright).
+        # For small DP ranges, low HA brightness maps below the configured minimum:
+        #   (1, 6), 20   -> 20 * 6/255       = 0.470   -> below min 1
+        #   (10, 15), 20 -> 20 * 6/255 + 9    = 9.470   -> below min 10
+        #   (1, 6), 1    -> 1  * 6/255        = 0.024   -> below min 1 (HA minimum)
+        # Each case is tested via both code paths: brightness and white.
+        # 1-4. Original bug: low brightness maps below min
+        ({"min": 1, "max": 6}, 1, 1, "brightness"),
+        ({"min": 1, "max": 6}, 1, 1, "white"),
+        ({"min": 1, "max": 6}, 20, 1, "brightness"),
+        ({"min": 1, "max": 6}, 20, 1, "white"),
+        # 5-6 Theoretical case for a light that uses 0 as a non-off brightness value.
+        ({"min": 0, "max": 6}, 1, 0, "brightness"),
+        ({"min": 0, "max": 6}, 1, 0, "white"),
+        # 7-8. Generic min: not just tied to min=1
+        ({"min": 10, "max": 15}, 20, 10, "brightness"),
+        ({"min": 10, "max": 15}, 20, 10, "white"),
+        # 9-10. Wide range snap: ensures bright=1 snaps to physical min, not proportional (3.92 -> 4)
+        ({"min": 1, "max": 1000}, 1, 1, "brightness"),
+        ({"min": 1, "max": 1000}, 1, 1, "white"),
+        # 11-12. Wide offset range snap: proves snap uses actual DP min
+        ({"min": 10, "max": 1000}, 1, 10, "brightness"),
+        ({"min": 10, "max": 1000}, 1, 10, "white"),
+        # 13-14. Normal mid-range value: proves we don't over-clamp
+        ({"min": 1, "max": 6}, 128, 3, "brightness"),
+        ({"min": 1, "max": 6}, 128, 3, "white"),
+        # 15-16. Maximum value: proves upper bound is reachable
+        ({"min": 1, "max": 6}, 255, 6, "brightness"),
+        ({"min": 1, "max": 6}, 255, 6, "white"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_async_turn_on_clamps_low_brightness_to_range_min(
+    brightness_range, ha_value, expected_dps, path
+):
+    """Low non-zero HA brightness should clamp to the first DP range value.
+
+    Tests both the regular brightness path (ATTR_BRIGHTNESS) and the white
+    brightness path (ATTR_WHITE) in async_turn_on, ensuring brightness_to_value
+    results below the DP minimum are clamped correctly.
+    """
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+
+    if path == "white":
+        dps_config = [
+            {"id": "1", "name": "switch", "type": "boolean"},
+            {
+                "id": "2",
+                "name": "color_mode",
+                "type": "string",
+                "mapping": [
+                    {"dps_val": "white", "value": "white"},
+                    {"dps_val": "colour", "value": "hs"},
+                ],
+            },
+            {
+                "id": "3",
+                "name": "brightness",
+                "type": "integer",
+                "range": brightness_range,
+            },
+        ]
+        device_dps = {"1": True, "2": "white", "3": brightness_range["min"]}
+        call_kwargs = {"white": ha_value}
+        assert_dp = "3"
+    else:
+        dps_config = [
+            {"id": "1", "name": "switch", "type": "boolean"},
+            {
+                "id": "2",
+                "name": "brightness",
+                "type": "integer",
+                "range": brightness_range,
+            },
+        ]
+        device_dps = {"1": True, "2": brightness_range["min"]}
+        call_kwargs = {"brightness": ha_value}
+        assert_dp = "2"
+
+    mock_device.get_property.side_effect = lambda arg: device_dps[arg]
+    mock_config = Mock()
+    config = TuyaEntityConfig(mock_config, {"entity": "light", "dps": dps_config})
+    light = TuyaLocalLight(mock_device, config)
+    await light.async_turn_on(**call_kwargs)
+    mock_device.async_set_properties.assert_called_once_with({assert_dp: expected_dps})
+
+
+@pytest.mark.parametrize(
+    ("brightness_range", "ha_value", "expected_dps", "step"),
+    [
+        ({"min": 0, "max": 6}, 1, 1, 1),
+        ({"min": 0, "max": 255}, 1, 10, 10),
+    ],
+)
+@pytest.mark.asyncio
+async def test_async_turn_on_avoids_0_when_0_is_off(
+    brightness_range, ha_value, expected_dps, step
+):
+    """Low non-zero HA brightness should clamp to the first non-off DP range value.
+
+    Tests the regular brightness path (ATTR_BRIGHTNESS), as ATTR_WHITE is not expected
+    to be used on a brightness only light, and was tested adequately above.
+    """
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+
+    dps_config = [
+        {
+            "id": "2",
+            "name": "brightness",
+            "type": "integer",
+            "range": brightness_range,
+            "mapping": [{"step": step}],
+        },
+    ]
+    device_dps = {"2": brightness_range["max"]}
+    call_kwargs = {"brightness": ha_value}
+
+    mock_device.get_property.side_effect = lambda arg: device_dps[arg]
+    mock_config = Mock()
+    config = TuyaEntityConfig(mock_config, {"entity": "light", "dps": dps_config})
+    light = TuyaLocalLight(mock_device, config)
+    await light.async_turn_on(**call_kwargs)
+    mock_device.async_set_properties.assert_called_once_with({"2": expected_dps})
+
+
+@pytest.mark.asyncio
 async def test_is_off_when_off_by_brightness():
     """Test that the light appears off when turned off by brightness."""
     mock_device = AsyncMock()
@@ -177,3 +364,134 @@ async def test_is_off_when_off_by_brightness():
     light = TuyaLocalLight(mock_device, config)
     assert light.is_on is False
     assert light.brightness == 0
+
+
+def _lsc_rgbcct_light_config():
+    return TuyaEntityConfig(
+        Mock(),
+        {
+            "entity": "light",
+            "dps": [
+                {"id": "20", "name": "switch", "type": "boolean"},
+                {
+                    "id": "61",
+                    "name": "control_data",
+                    "type": "base64",
+                    "format": [
+                        {"name": "unknown1", "bytes": 1},
+                        {"name": "mode", "bytes": 1},
+                        {"name": "unknown2", "bytes": 1},
+                        {"name": "unknown3", "bytes": 1},
+                        {"name": "unknown4", "bytes": 1},
+                        {"name": "hue_high", "bytes": 1},
+                        {"name": "hue_low", "bytes": 1},
+                        {"name": "saturation_value", "bytes": 1},
+                        {"name": "brightness_value", "bytes": 1},
+                    ],
+                },
+            ],
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_init_entry_lsc_rgbcct_ledstrip(hass):
+    """Test the LSC RGB+CCT LED strip uses a dedicated light class."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_TYPE: "lsc_rgbcct_ledstrip",
+            CONF_DEVICE_ID: "dummy",
+            CONF_PROTOCOL_VERSION: "auto",
+        },
+    )
+    m_add_entities = Mock()
+    m_device = AsyncMock()
+
+    hass.data[DOMAIN] = {}
+    hass.data[DOMAIN]["dummy"] = {}
+    hass.data[DOMAIN]["dummy"]["device"] = m_device
+
+    await async_setup_entry(hass, entry, m_add_entities)
+    assert type(hass.data[DOMAIN]["dummy"]["light"]) is LSCRGBCCTLight
+    m_add_entities.assert_called_once()
+
+
+def test_lsc_rgbcct_light_reads_hs_color():
+    """Test decoding HS color from DP61 control data."""
+    mock_device = Mock()
+    payload = bytes([0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x5A, 0x32, 0x64])
+    dps = {
+        "20": True,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    assert light.color_mode == ColorMode.HS
+    assert light.hs_color == (90, 50)
+    assert light.brightness == 255
+
+
+def test_lsc_rgbcct_light_reads_color_temp():
+    """Test decoding white mode color temperature from DP61 control data."""
+    mock_device = Mock()
+    payload = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x32, 0x00, 0x00])
+    dps = {
+        "20": True,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    assert light.color_mode == ColorMode.COLOR_TEMP
+    assert light.color_temp_kelvin == 4600
+    assert light.brightness == 255
+
+
+@pytest.mark.asyncio
+async def test_lsc_rgbcct_light_turn_on_hs():
+    """Test encoding HS color into DP61 control data."""
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+    payload = bytes([0x00, 0x00, 0x00, 0x14, 0x00, 0x64, 0x64, 0x64, 0x64])
+    dps = {
+        "20": False,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    await light.async_turn_on(hs_color=(120, 75), brightness=128)
+
+    mock_device.async_set_properties.assert_called_once()
+    sent = mock_device.async_set_properties.call_args[0][0]
+    assert sent["20"] is True
+    decoded = base64.b64decode(sent["61"])
+    assert decoded[1] == 0x01
+    assert (decoded[5] << 8) | decoded[6] == 120
+    assert decoded[7] == 75
+    assert decoded[8] == 50
+
+
+@pytest.mark.asyncio
+async def test_lsc_rgbcct_light_turn_on_color_temp():
+    """Test encoding color temperature into DP61 control data."""
+    mock_device = AsyncMock()
+    mock_device.get_property = Mock()
+    payload = bytes([0x00, 0x01, 0x00, 0x14, 0x00, 0x64, 0x64, 0x64, 0x64])
+    dps = {
+        "20": True,
+        "61": base64.b64encode(payload).decode("ascii"),
+    }
+    mock_device.get_property.side_effect = lambda arg: dps[arg]
+    light = LSCRGBCCTLight(mock_device, _lsc_rgbcct_light_config())
+
+    await light.async_turn_on(color_temp_kelvin=4600, brightness=255)
+
+    mock_device.async_set_properties.assert_called_once()
+    sent = mock_device.async_set_properties.call_args[0][0]
+    decoded = base64.b64decode(sent["61"])
+    assert decoded[1] == 0x00
+    assert decoded[5] == 100
+    assert decoded[6] == 50
