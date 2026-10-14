@@ -34,8 +34,7 @@ entities:
         type: boolean
         name: switch
   - entity: switch
-    name: Camera record
-    icon: "mdi:record"
+    translation_key: camera_record
     dps:
       - id: 150
         type: boolean
@@ -240,7 +239,7 @@ entities:
         name: sensor
         unit: "%"
   - entity: event
-    name: Notification
+    translation_key: notification
     dps:
       - id: 212
         type: utf16b64

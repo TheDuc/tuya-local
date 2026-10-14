@@ -360,6 +360,9 @@
         "event": {
             "alarm": {
                 "default": "mdi:alarm-bell"
+            },
+            "notification": {
+                "default": "mdi:message-alert"
             }
         },
         "humidifier": {
@@ -792,6 +795,12 @@
             "ambient_temperature": {
                 "default": "mdi:sun-thermometer"
             },
+            "inlet_temperature": {
+                "default": "mdi:water-thermometer"
+            },
+            "outlet_temperature": {
+                "default": "mdi:water-thermometer"
+            },
             "cleanliness": {
                 "default": "mdi:biohazard",
                 "state": {
@@ -989,6 +998,9 @@
                     "on": "mdi:fuse",
                     "off": "mdi:fuse-off"
                 }
+            },
+            "camera_record": {
+                "default": "mdi:record-rec"
             },
             "do_not_disturb": {
                 "default": "mdi:bell-sleep",

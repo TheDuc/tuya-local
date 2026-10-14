@@ -7,8 +7,7 @@ products:
     model: 2MP peephole camera
 entities:
   - entity: switch
-    name: Camera record
-    icon: "mdi:record"
+    translation_key: camera_record
     dps:
       - id: 150
         type: boolean
@@ -192,7 +191,7 @@ entities:
         optional: true
         name: message
   - entity: event
-    name: Notification
+    translation_key: notification
     category: diagnostic
     dps:
       - id: 212
